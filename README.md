@@ -60,3 +60,4 @@ pip install -r requirements.txt
 ```bas
 python app.py
 ```
+the next Version of this project is in building process
