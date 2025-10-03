@@ -1,140 +1,153 @@
 # =========================
-# Import Required Libraries
+# Flask AI Disease Prediction App
 # =========================
-from flask import Flask, request, render_template  # Flask for web app, request for form data
-import numpy as np  # For handling numerical data and arrays
-import pandas as pd  # For loading and managing CSV datasets
-import pickle  # For loading the pre-trained model
 
-# =========================
-# Initialize Flask App
-# =========================
-app = Flask(__name__)  # Create Flask app instance
+# Importing required libraries
+from flask import Flask, request, render_template
+import numpy as np
+import pandas as pd
+import pickle
+import logging
 
 # =========================
-# Load Dataset Files
+# Initialize Flask app
 # =========================
-# These CSVs contain all the necessary information about diseases, symptoms, precautions, diet, workouts, etc.
+app = Flask(__name__)
 
-# List of symptoms for all diseases
-sym_des = pd.read_csv("datasets/symptoms_df.csv")
+# =========================
+# Setup Logging
+# =========================
+# All requests and predictions will be logged in app.log
+logging.basicConfig(filename='app.log', level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Precautions for each disease (like do's and don'ts)
-precautions = pd.read_csv("datasets/precautions_df.csv")
-
-# Recommended workouts for each disease
-workout = pd.read_csv("datasets/workout_df.csv")
-
-# Detailed description for each disease
-description = pd.read_csv("datasets/description.csv")
-
-# Medications prescribed for each disease
-medications = pd.read_csv('datasets/medications.csv')
-
-# Recommended diet plans for each disease
-diets = pd.read_csv("datasets/diets.csv")
+# =========================
+# Load Datasets
+# =========================
+# These CSV files contain information about diseases, symptoms, precautions, medications, diets, and workouts.
+sym_des = pd.read_csv("datasets/symptoms_df.csv")   # Symptom to disease mapping (main dataset)
+precautions = pd.read_csv("datasets/precautions_df.csv")  # Disease-specific precautions
+workout = pd.read_csv("datasets/workout_df.csv")    # Disease-specific workout recommendations
+description = pd.read_csv("datasets/description.csv")  # Disease descriptions
+medications = pd.read_csv('datasets/medications.csv')  # Disease-specific medications
+diets = pd.read_csv("datasets/diets.csv")  # Recommended diets for diseases
 
 # =========================
 # Load Pre-trained Model
 # =========================
-# Load the SVC model that predicts disease based on symptoms
+# Loading the Support Vector Classifier model (SVC) trained on symptoms-disease data
 svc = pickle.load(open('svc.pkl', 'rb'))
 
 # =========================
-# Helper Function
+# Helper Functions
 # =========================
+
+def get_description(disease):
+    """Return the description of the disease"""
+    return " ".join(description[description['Disease']==disease]['Description'].values)
+
+def get_precautions(disease):
+    """Return a list of precautions for the disease"""
+    pre = precautions[precautions['Disease']==disease][['Precaution_1','Precaution_2','Precaution_3','Precaution_4']].values.tolist()
+    return pre[0] if pre else []
+
+def get_medications(disease):
+    """Return a list of medications for the disease"""
+    return medications[medications['Disease']==disease]['Medication'].tolist()
+
+def get_diet(disease):
+    """Return recommended diets for the disease"""
+    return diets[diets['Disease']==disease]['Diet'].tolist()
+
+def get_workout(disease):
+    """Return recommended workouts for the disease"""
+    return workout[workout['disease']==disease]['workout'].tolist()
+
 def helper(dis):
     """
-    Given a predicted disease name, return all related information:
-    - Description
-    - Precautions
-    - Medications
-    - Diet recommendations
-    - Recommended workouts
+    Combines all information about a predicted disease:
+    Description, Precautions, Medications, Diet, Workout
     """
-    # Fetch disease description
-    desc = " ".join(description[description['Disease'] == dis]['Description'].values)
-    
-    # Fetch precautions; may return empty list if not found
-    pre = precautions[precautions['Disease'] == dis][['Precaution_1', 'Precaution_2', 'Precaution_3', 'Precaution_4']].values.tolist()
-    
-    # Fetch medications list
-    med = medications[medications['Disease'] == dis]['Medication'].tolist()
-    
-    # Fetch recommended diets
-    die = diets[diets['Disease'] == dis]['Diet'].tolist()
-    
-    # Fetch workouts
-    wrkout = workout[workout['disease'] == dis]['workout'].tolist()
-    
-    # Return all information
-    return desc, pre[0] if pre else [], med, die, wrkout
+    return get_description(dis), get_precautions(dis), get_medications(dis), get_diet(dis), get_workout(dis)
+
+def clean_symptoms(symptoms):
+    """
+    Clean and normalize user input symptoms:
+    - Convert to lowercase
+    - Remove extra spaces
+    - Replace spaces with underscores
+    """
+    return [s.strip().lower().replace(" ", "_") for s in symptoms.split(',')]
 
 # =========================
-# Symptoms to Vector Mapping
+# Symptoms Dictionary
+# Maps symptom name to input vector index for the model
 # =========================
-# This dictionary maps symptom names to a specific index in the input vector
-# The input vector is used to feed the ML model
-symptoms_dict = {'itching': 0, 'skin_rash': 1, 'nodal_skin_eruptions': 2, 'continuous_sneezing': 3, 
-                 'shivering': 4, 'chills': 5, 'joint_pain': 6, 'stomach_pain': 7, 'acidity': 8, 
-                 'ulcers_on_tongue': 9, 'muscle_wasting': 10, 'vomiting': 11, 'burning_micturition': 12,
-                 'spotting_ urination': 13, 'fatigue': 14, 'weight_gain': 15, 'anxiety': 16, 
-                 'cold_hands_and_feets': 17, 'mood_swings': 18, 'weight_loss': 19, 'restlessness': 20, 
-                 'lethargy': 21, 'patches_in_throat': 22, 'irregular_sugar_level': 23, 'cough': 24, 
-                 'high_fever': 25, 'sunken_eyes': 26, 'breathlessness': 27, 'sweating': 28, 'dehydration': 29, 
-                 'indigestion': 30, 'headache': 31, 'yellowish_skin': 32, 'dark_urine': 33, 'nausea': 34, 
-                 'loss_of_appetite': 35, 'pain_behind_the_eyes': 36, 'back_pain': 37, 'constipation': 38, 
-                 'abdominal_pain': 39, 'diarrhoea': 40, 'mild_fever': 41, 'yellow_urine': 42, 
-                 'yellowing_of_eyes': 43, 'acute_liver_failure': 44, 'fluid_overload': 45, 
-                 'swelling_of_stomach': 46, 'swelled_lymph_nodes': 47, 'malaise': 48, 
-                 'blurred_and_distorted_vision': 49, 'phlegm': 50, 'throat_irritation': 51, 
-                 'redness_of_eyes': 52, 'sinus_pressure': 53, 'runny_nose': 54, 'congestion': 55, 
-                 'chest_pain': 56, 'weakness_in_limbs': 57, 'fast_heart_rate': 58, 
-                 'pain_during_bowel_movements': 59, 'pain_in_anal_region': 60, 'bloody_stool': 61, 
-                 'irritation_in_anus': 62, 'neck_pain': 63, 'dizziness': 64, 'cramps': 65, 'bruising': 66, 
-                 'obesity': 67, 'swollen_legs': 68, 'swollen_blood_vessels': 69, 'puffy_face_and_eyes': 70, 
-                 'enlarged_thyroid': 71, 'brittle_nails': 72, 'swollen_extremeties': 73, 'excessive_hunger': 74, 
-                 'extra_marital_contacts': 75, 'drying_and_tingling_lips': 76, 'slurred_speech': 77, 
-                 'knee_pain': 78, 'hip_joint_pain': 79, 'muscle_weakness': 80, 'stiff_neck': 81, 
-                 'swelling_joints': 82, 'movement_stiffness': 83, 'spinning_movements': 84, 'loss_of_balance': 85, 
-                 'unsteadiness': 86, 'weakness_of_one_body_side': 87, 'loss_of_smell': 88, 'bladder_discomfort': 89, 
-                 'foul_smell_of urine': 90, 'continuous_feel_of_urine': 91, 'passage_of_gases': 92, 'internal_itching': 93, 
-                 'toxic_look_(typhos)': 94, 'depression': 95, 'irritability': 96, 'muscle_pain': 97, 
-                 'altered_sensorium': 98, 'red_spots_over_body': 99, 'belly_pain': 100, 
-                 'abnormal_menstruation': 101, 'dischromic _patches': 102, 'watering_from_eyes': 103, 
-                 'increased_appetite': 104, 'polyuria': 105, 'family_history': 106, 'mucoid_sputum': 107, 
-                 'rusty_sputum': 108, 'lack_of_concentration': 109, 'visual_disturbances': 110, 
-                 'receiving_blood_transfusion': 111, 'receiving_unsterile_injections': 112, 'coma': 113, 
-                 'stomach_bleeding': 114, 'distention_of_abdomen': 115, 'history_of_alcohol_consumption': 116, 
-                 'fluid_overload.1': 117, 'blood_in_sputum': 118, 'prominent_veins_on_calf': 119, 
-                 'palpitations': 120, 'painful_walking': 121, 'pus_filled_pimples': 122, 'blackheads': 123, 
-                 'scurring': 124, 'skin_peeling': 125, 'silver_like_dusting': 126, 'small_dents_in_nails': 127, 
-                 'inflammatory_nails': 128, 'blister': 129, 'red_sore_around_nose': 130, 'yellow_crust_ooze': 131}
+symptoms_dict = {
+    'itching': 0, 'skin_rash': 1, 'nodal_skin_eruptions': 2, 'continuous_sneezing': 3,
+    'shivering': 4, 'chills': 5, 'joint_pain': 6, 'stomach_pain': 7, 'acidity': 8,
+    'ulcers_on_tongue': 9, 'muscle_wasting': 10, 'vomiting': 11, 'burning_micturition': 12,
+    'spotting_ urination': 13, 'fatigue': 14, 'weight_gain': 15, 'anxiety': 16,
+    'cold_hands_and_feets': 17, 'mood_swings': 18, 'weight_loss': 19, 'restlessness': 20,
+    'lethargy': 21, 'patches_in_throat': 22, 'irregular_sugar_level': 23, 'cough': 24,
+    'high_fever': 25, 'sunken_eyes': 26, 'breathlessness': 27, 'sweating': 28,
+    'dehydration': 29, 'indigestion': 30, 'headache': 31, 'yellowish_skin': 32,
+    'dark_urine': 33, 'nausea': 34, 'loss_of_appetite': 35, 'pain_behind_the_eyes': 36,
+    'back_pain': 37, 'constipation': 38, 'abdominal_pain': 39, 'diarrhoea': 40,
+    'mild_fever': 41, 'yellow_urine': 42, 'yellowing_of_eyes': 43, 'acute_liver_failure': 44,
+    'fluid_overload': 45, 'swelling_of_stomach': 46, 'swelled_lymph_nodes': 47, 'malaise': 48,
+    'blurred_and_distorted_vision': 49, 'phlegm': 50, 'throat_irritation': 51, 'redness_of_eyes': 52,
+    'sinus_pressure': 53, 'runny_nose': 54, 'congestion': 55, 'chest_pain': 56, 'weakness_in_limbs': 57,
+    'fast_heart_rate': 58, 'pain_during_bowel_movements': 59, 'pain_in_anal_region': 60,
+    'bloody_stool': 61, 'irritation_in_anus': 62, 'neck_pain': 63, 'dizziness': 64, 'cramps': 65,
+    'bruising': 66, 'obesity': 67, 'swollen_legs': 68, 'swollen_blood_vessels': 69,
+    'puffy_face_and_eyes': 70, 'enlarged_thyroid': 71, 'brittle_nails': 72, 'swollen_extremeties': 73,
+    'excessive_hunger': 74, 'extra_marital_contacts': 75, 'drying_and_tingling_lips': 76,
+    'slurred_speech': 77, 'knee_pain': 78, 'hip_joint_pain': 79, 'muscle_weakness': 80,
+    'stiff_neck': 81, 'swelling_joints': 82, 'movement_stiffness': 83, 'spinning_movements': 84,
+    'loss_of_balance': 85, 'unsteadiness': 86, 'weakness_of_one_body_side': 87, 'loss_of_smell': 88,
+    'bladder_discomfort': 89, 'foul_smell_of urine': 90, 'continuous_feel_of_urine': 91,
+    'passage_of_gases': 92, 'internal_itching': 93, 'toxic_look_(typhos)': 94, 'depression': 95,
+    'irritability': 96, 'muscle_pain': 97, 'altered_sensorium': 98, 'red_spots_over_body': 99,
+    'belly_pain': 100, 'abnormal_menstruation': 101, 'dischromic _patches': 102, 'watering_from_eyes': 103,
+    'increased_appetite': 104, 'polyuria': 105, 'family_history': 106, 'mucoid_sputum': 107,
+    'rusty_sputum': 108, 'lack_of_concentration': 109, 'visual_disturbances': 110,
+    'receiving_blood_transfusion': 111, 'receiving_unsterile_injections': 112, 'coma': 113,
+    'stomach_bleeding': 114, 'distention_of_abdomen': 115, 'history_of_alcohol_consumption': 116,
+    'fluid_overload.1': 117, 'blood_in_sputum': 118, 'prominent_veins_on_calf': 119,
+    'palpitations': 120, 'painful_walking': 121, 'pus_filled_pimples': 122, 'blackheads': 123,
+    'scurring': 124, 'skin_peeling': 125, 'silver_like_dusting': 126, 'small_dents_in_nails': 127,
+    'inflammatory_nails': 128, 'blister': 129, 'red_sore_around_nose': 130, 'yellow_crust_ooze': 131
+}
 
-# Mapping model output index to actual disease names
-diseases_list = {15: 'Fungal infection', 4: 'Allergy', 16: 'GERD', 9: 'Chronic cholestasis', 
-                 14: 'Drug Reaction', 33: 'Peptic ulcer diseae', 1: 'AIDS', 12: 'Diabetes ', 17: 'Gastroenteritis', 
-                 6: 'Bronchial Asthma', 23: 'Hypertension ', 30: 'Migraine', 7: 'Cervical spondylosis', 
-                 32: 'Paralysis (brain hemorrhage)', 28: 'Jaundice', 29: 'Malaria', 8: 'Chicken pox', 11: 'Dengue', 
-                 37: 'Typhoid', 40: 'hepatitis A', 19: 'Hepatitis B', 20: 'Hepatitis C', 21: 'Hepatitis D', 
-                 22: 'Hepatitis E', 3: 'Alcoholic hepatitis', 36: 'Tuberculosis', 10: 'Common Cold', 34: 'Pneumonia', 
-                 13: 'Dimorphic hemmorhoids(piles)', 18: 'Heart attack', 39: 'Varicose veins', 26: 'Hypothyroidism', 
-                 24: 'Hyperthyroidism', 25: 'Hypoglycemia', 31: 'Osteoarthristis', 5: 'Arthritis', 
-                 0: '(vertigo) Paroymsal  Positional Vertigo', 2: 'Acne', 38: 'Urinary tract infection', 
-                 35: 'Psoriasis', 27: 'Impetigo'}
+# Disease list mapping model output to disease names
+diseases_list = {
+    15: 'Fungal infection', 4: 'Allergy', 16: 'GERD', 9: 'Chronic cholestasis',
+    14: 'Drug Reaction', 33: 'Peptic ulcer diseae', 1: 'AIDS', 12: 'Diabetes ', 17: 'Gastroenteritis',
+    6: 'Bronchial Asthma', 23: 'Hypertension ', 30: 'Migraine', 7: 'Cervical spondylosis',
+    32: 'Paralysis (brain hemorrhage)', 28: 'Jaundice', 29: 'Malaria', 8: 'Chicken pox',
+    11: 'Dengue', 37: 'Typhoid', 40: 'hepatitis A', 19: 'Hepatitis B', 20: 'Hepatitis C',
+    21: 'Hepatitis D', 22: 'Hepatitis E', 3: 'Alcoholic hepatitis', 36: 'Tuberculosis',
+    10: 'Common Cold', 34: 'Pneumonia', 13: 'Dimorphic hemmorhoids(piles)', 18: 'Heart attack',
+    39: 'Varicose veins', 26: 'Hypothyroidism', 24: 'Hyperthyroidism', 25: 'Hypoglycemia',
+    31: 'Osteoarthristis', 5: 'Arthritis', 0: '(vertigo) Paroymsal  Positional Vertigo',
+    2: 'Acne', 38: 'Urinary tract infection', 35: 'Psoriasis', 27: 'Impetigo'
+}
 
 # =========================
-# Function to Predict Disease
+# Prediction Function
 # =========================
 def get_predicted_value(symptoms):
     """
-    Convert user-entered symptoms into model input vector and predict disease
+    Predict the disease based on user input symptoms.
+    1. Convert symptoms to input vector
+    2. Pass vector to SVC model
+    3. Return predicted disease name
     """
-    input_vector = np.zeros(len(symptoms_dict))  # Initialize vector with zeros
+    input_vector = np.zeros(len(symptoms_dict))
     for symptom in symptoms:
         if symptom in symptoms_dict:
-            input_vector[symptoms_dict[symptom]] = 1  # Mark symptom as present
-    # Return the disease name predicted by the SVC model
+            input_vector[symptoms_dict[symptom]] = 1
     return diseases_list[svc.predict([input_vector])[0]]
 
 # =========================
@@ -148,9 +161,44 @@ def index():
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    """
-    Handle the prediction request from the user
-    """
-    symptoms = request.form.get('symptoms')  # Get user input
+    """Handle prediction request from user"""
+    symptoms = request.form.get('symptoms')
+    logging.info(f"Received symptoms: {symptoms}")
+
     if not symptoms or symptoms.lower() == 'symptoms':
-        return render_template('
+        return render_template('index.html', message="Please enter valid symptoms.")
+
+    # Clean and normalize user input
+    user_symptoms = clean_symptoms(symptoms)
+    
+    # Get predicted disease
+    predicted_disease = get_predicted_value(user_symptoms)
+    logging.info(f"Predicted disease: {predicted_disease}")
+
+    # Get all related info
+    dis_des, my_precautions, medications, rec_diet, wrkout = helper(predicted_disease)
+
+    # Render results back to home page
+    return render_template('index.html', predicted_disease=predicted_disease, dis_des=dis_des,
+                           my_precautions=my_precautions, medications=medications, my_diet=rec_diet,
+                           workout=wrkout)
+
+# About page
+@app.route('/about')
+def about():
+    return render_template('about.html')
+
+# Contact page
+@app.route('/contact')
+def contact():
+    return render_template('contact.html')
+
+# Blog page
+@app.route('/blog')
+def blog():
+    return render_template('blog.html')
+
+# =========================
+# Run Flask App
+# =========================
+if __name__ == '__main
